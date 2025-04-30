@@ -1,88 +1,112 @@
 import os
+import json
 import random
 import requests
 import io
-import json
+import re
 from pptx import Presentation
-from pptx.util import Inches
-from PIL import Image
-import google.generativeai as genai
+from pptx.util import Inches, Pt
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.dml.color import RGBColor
+from google.generativeai import configure, GenerativeModel
 
-# --- CONFIG ---
-GOOGLE_API_KEY = 'AIzaSyAABoqmArgjddo1ROP9q4dLYf_Bo7WVLsQ'        
-GOOGLE_CX = '35d98aa59458c428a'          
-GEMINI_API_KEY = 'AIzaSyAVwOIb2B3hE_hRxlpt5EWcNANAsg3eJ8U'
+# === CONFIGURATION ===
+GOOGLE_API_KEY = "AIzaSyAABoqmArgjddo1ROP9q4dLYf_Bo7WVLsQ"  # Replace this with your actual Gemini API key
+SEARCH_ENGINE_ID = "35d98aa59458c428a"  # Replace with your Google Custom Search Engine ID
+GEMINI_API = "AIzaSyAVwOIb2B3hE_hRxlpt5EWcNANAsg3eJ8U"
 
-# --- SETUP ---
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
+configure(api_key=GEMINI_API)
+model = GenerativeModel(model_name="models/gemini-1.5-pro")
 
-# --- IMAGE CONVERSION ---
-def convert_image_to_supported_format(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    output = io.BytesIO()
-    img.save(output, format="PNG")
-    output.seek(0)
-    return output
+TEMPLATE_DIR = "templates"
 
-# --- STRUCTURED SUBTOPIC GENERATION ---
-def generate_subtopics(topic, count=5):
-    prompt = f"""
-Generate a list of {count} presentation slide objects in JSON.
-Each object should include a 'title' and 'content' field.
-The topic is: {topic}
 
-Example:
+def extract_valid_json(text):
+    match = re.search(r'\[.*\]', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def generate_subtopics(topic, count=5, retries=2):
+    prompt = f'''
+You are an expert presentation assistant.
+
+Generate exactly {count} slides on the topic: "{topic}" in the following JSON format ONLY:
+
 [
-  {{"title": "Introduction to AI", "content": "Artificial Intelligence is the simulation of human intelligence..."}},
+  {{
+    "title": "Slide Title",
+    "content": "Slide content..."
+  }},
   ...
 ]
-Only return valid JSON.
-"""
-    response = model.generate_content(prompt)
-    try:
-        slides = json.loads(response.text)
-        return [(s["title"], s["content"]) for s in slides if "title" in s and "content" in s]
-    except json.JSONDecodeError:
-        print("Error: Gemini did not return valid JSON.")
-        return []
 
-# --- GOOGLE IMAGE FETCH ---
-def get_image_url(query):
-    url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={GOOGLE_CX}&key={GOOGLE_API_KEY}&searchType=image&num=1"
-    try:
-        res = requests.get(url).json()
-        return res["items"][0]["link"]
-    except:
-        return None
+Do not include any commentary, explanations, markdown, or text outside the JSON array.
+Ensure the JSON is valid.
+'''
+    for attempt in range(retries):
+        response = model.generate_content(prompt)
+        slides = extract_valid_json(response.text)
+        if slides:
+            return [(s["title"], s["content"]) for s in slides if "title" in s and "content" in s]
 
-# --- ALTERNATING IMAGE POSITIONS ---
-def alternating_image_position(index):
-    positions = [
-        (Inches(5.5), Inches(0.5), Inches(3)),  # Top-right
-        (Inches(0.5), Inches(4.5), Inches(3.5)),  # Bottom-left
-    ]
-    return positions[index % len(positions)]
+        print(f"⚠️ Attempt {attempt + 1}: Failed to get valid JSON from Gemini.")
 
-# --- SLIDE CREATION ---
-def create_content_slide(prs, title, content, image_stream=None, index=0):
-    layout = prs.slide_layouts[1]  # Title + Content
+    print("❌ Gemini failed to return valid slide data after retries.")
+    return []
+
+
+def fetch_image(query):
+    search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&searchType=image&key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&num=1"
+    response = requests.get(search_url).json()
+    items = response.get("items")
+    if items:
+        img_url = items[0]["link"]
+        img_data = requests.get(img_url).content
+
+        # Convert WEBP to PNG if needed
+        if img_url.lower().endswith(".webp"):
+            from PIL import Image
+            img = Image.open(io.BytesIO(img_data)).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf
+
+        return io.BytesIO(img_data)
+    return None
+
+
+def create_content_slide(prs, title, content, image_stream):
+    layout = prs.slide_layouts[1]  # Title and content layout
     slide = prs.slides.add_slide(layout)
+
     slide.shapes.title.text = title
     slide.placeholders[1].text = content
 
     if image_stream:
-        left, top, width = alternating_image_position(index)
-        slide.shapes.add_picture(image_stream, left, top, width=width)
+        positions = [
+            (Inches(5), Inches(1), Inches(3)),
+            (Inches(1), Inches(4), Inches(4)),
+            (Inches(2), Inches(1), Inches(5))
+        ]
+        pos = random.choice(positions)
+        try:
+            slide.shapes.add_picture(image_stream, pos[0], pos[1], width=pos[2])
+        except Exception as e:
+            print("Image error:", e)
 
-# --- TEMPLATE LOADER ---
-def load_random_template():
-    templates = [f for f in os.listdir("templates") if f.endswith(".pptx")]
+
+def choose_random_template():
+    templates = [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".pptx")]
     if not templates:
-        raise FileNotFoundError("No templates found in the 'templates' folder.")
-    return Presentation(os.path.join("templates", random.choice(templates)))
+        raise FileNotFoundError("No PPTX templates found in the 'templates/' directory.")
+    return os.path.join(TEMPLATE_DIR, random.choice(templates))
 
-# --- MAIN APP ---
+
 def main():
     topic = input("Enter your presentation topic: ")
     slide_count = int(input("How many slides? "))
@@ -92,22 +116,17 @@ def main():
         print("Failed to generate slides. Exiting.")
         return
 
-    prs = load_random_template()
+    template_path = choose_random_template()
+    prs = Presentation(template_path)
 
-    for i, (title, content) in enumerate(subtopics):
-        image_url = get_image_url(title)
-        image_stream = None
-        if image_url:
-            try:
-                image_data = requests.get(image_url).content
-                image_stream = convert_image_to_supported_format(image_data)
-            except:
-                print(f"Image load failed for: {title}")
-        create_content_slide(prs, title, content, image_stream, i)
+    for title, content in subtopics:
+        img = fetch_image(title)
+        create_content_slide(prs, title, content, img)
 
-    filename = f"{topic.strip().replace(' ', '_')}_presentation.pptx"
-    prs.save(filename)
-    print(f"✅ Presentation saved as: {filename}")
+    output_path = f"{topic.replace(' ', '_')}.pptx"
+    prs.save(output_path)
+    print(f"✅ Presentation saved to {output_path}")
+
 
 if __name__ == "__main__":
     main()
