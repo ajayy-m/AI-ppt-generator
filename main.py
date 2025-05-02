@@ -20,7 +20,6 @@ model = GenerativeModel(model_name="models/gemini-1.5-pro")
 
 TEMPLATE_DIR = "templates"
 
-
 def extract_valid_json(text):
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if match:
@@ -29,7 +28,6 @@ def extract_valid_json(text):
         except json.JSONDecodeError:
             return []
     return []
-
 
 def generate_subtopics(topic, count=5, retries=2):
     prompt = f'''
@@ -59,7 +57,6 @@ Ensure the JSON is valid.
     print("❌ Gemini failed to return valid slide data after retries.")
     return []
 
-
 def fetch_image(query):
     search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&searchType=image&key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&num=1"
     response = requests.get(search_url).json()
@@ -79,33 +76,34 @@ def fetch_image(query):
         return io.BytesIO(img_data)
     return None
 
+def create_content_slide(prs, title, content, image_stream, index):
+    blank_slide_layout = prs.slide_layouts[6]  # Use a blank layout
+    slide = prs.slides.add_slide(blank_slide_layout)
 
-def create_content_slide(prs, title, content, image_stream):
-    layout = prs.slide_layouts[1]  # Title and content layout
-    slide = prs.slides.add_slide(layout)
+    left_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(4.5), Inches(6))
+    right_box = slide.shapes.add_textbox(Inches(5), Inches(0.5), Inches(4.5), Inches(6))
 
-    slide.shapes.title.text = title
-    slide.placeholders[1].text = content
+    if index % 2 == 0:
+        # Even index: image left, text right
+        if image_stream:
+            slide.shapes.add_picture(image_stream, Inches(0.5), Inches(1), width=Inches(4.5))
+        tf = right_box.text_frame
+    else:
+        # Odd index: text left, image right
+        tf = left_box.text_frame
+        if image_stream:
+            slide.shapes.add_picture(image_stream, Inches(5), Inches(1), width=Inches(4.5))
 
-    if image_stream:
-        positions = [
-            (Inches(5), Inches(1), Inches(3)),
-            (Inches(1), Inches(4), Inches(4)),
-            (Inches(2), Inches(1), Inches(5))
-        ]
-        pos = random.choice(positions)
-        try:
-            slide.shapes.add_picture(image_stream, pos[0], pos[1], width=pos[2])
-        except Exception as e:
-            print("Image error:", e)
-
+    tf.text = title
+    p = tf.add_paragraph()
+    p.text = content
+    p.level = 1
 
 def choose_random_template():
     templates = [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".pptx")]
     if not templates:
         raise FileNotFoundError("No PPTX templates found in the 'templates/' directory.")
     return os.path.join(TEMPLATE_DIR, random.choice(templates))
-
 
 def main():
     topic = input("Enter your presentation topic: ")
@@ -119,14 +117,13 @@ def main():
     template_path = choose_random_template()
     prs = Presentation(template_path)
 
-    for title, content in subtopics:
+    for idx, (title, content) in enumerate(subtopics):
         img = fetch_image(title)
-        create_content_slide(prs, title, content, img)
+        create_content_slide(prs, title, content, img, idx)
 
     output_path = f"{topic.replace(' ', '_')}.pptx"
     prs.save(output_path)
     print(f"✅ Presentation saved to {output_path}")
-
 
 if __name__ == "__main__":
     main()
