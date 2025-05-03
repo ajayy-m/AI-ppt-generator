@@ -84,19 +84,39 @@ def create_content_slide(prs, title, content, image_stream, index):
     blank_slide_layout = prs.slide_layouts[6]
     slide = prs.slides.add_slide(blank_slide_layout)
 
-    left_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(4.5), Inches(6))
-    right_box = slide.shapes.add_textbox(Inches(5), Inches(0.5), Inches(4.5), Inches(6))
+    # Layout constants
+    margin = Inches(0.5)
+    image_width = Inches(4.5)
+    image_height = Inches(4.0)
+    text_width = Inches(4.5)
+    text_height = Inches(5.0)
 
     if index % 2 == 0:
-        if image_stream:
-            slide.shapes.add_picture(image_stream, Inches(0.5), Inches(1), width=Inches(4.5))
-        tf = right_box.text_frame
+        # Even: Image left, Text right
+        image_left = margin
+        text_left = Inches(5)
     else:
-        tf = left_box.text_frame
-        if image_stream:
-            slide.shapes.add_picture(image_stream, Inches(5), Inches(1), width=Inches(4.5))
+        # Odd: Text left, Image right
+        image_left = Inches(5)
+        text_left = margin
 
+    # Add image if available
+    if image_stream:
+        try:
+            slide.shapes.add_picture(image_stream, image_left, Inches(1.0), width=image_width, height=image_height)
+        except Exception as e:
+            print(f"⚠️ Could not add image: {e}")
+
+    # Add text box
+    textbox = slide.shapes.add_textbox(text_left, Inches(0.5), text_width, text_height)
+    tf = textbox.text_frame
+    tf.word_wrap = True
+    tf.auto_size = True
+
+    # Title
     tf.text = title
+
+    # Content
     p = tf.add_paragraph()
     p.text = content
     p.level = 1
