@@ -40,51 +40,63 @@ Generate a JSON list of {count} slides on the topic: "{topic}", structured as fo
 2. {middle} subtopic slides (AI-generated subtopics relevant to the topic)
 3. "Conclusion" — a summary or concluding slide
 
+Each slide must include:
+- "title"
+- "content"
+- "image_type": choose from ["diagram", "illustration", "chart", "photo", "concept"]
+
 Format:
 [
   {{
     "title": "Slide Title",
-    "content": "Slide content..."
+    "content": "Slide content...",
+    "image_type": "diagram"
   }},
   ...
 ]
 
-Output ONLY the JSON list, no extra text or commentary.
-Ensure the JSON is valid.
+Only return valid JSON. No commentary.
 '''
     for attempt in range(retries):
         response = model.generate_content(prompt)
         slides = extract_valid_json(response.text)
         if slides:
-            return [(s["title"], s["content"]) for s in slides if "title" in s and "content" in s]
+            return [(s["title"], s["content"], s.get("image_type", "concept")) for s in slides]
         print(f"⚠️ Attempt {attempt + 1}: Failed to get valid JSON from Gemini.")
     print("❌ Gemini failed to return valid slide data after retries.")
     return []
 
-def fetch_image(main_topic, subtopic):
-    query = f"{main_topic} {subtopic}"
-    search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&searchType=image&key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&num=1"
-    response = requests.get(search_url).json()
-    items = response.get("items")
-    if items:
-        img_url = items[0]["link"]
-        try:
-            img_data = requests.get(img_url).content
-            if img_url.lower().endswith(".webp"):
-                img = Image.open(io.BytesIO(img_data)).convert("RGB")
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                return buf
-            return io.BytesIO(img_data)
-        except Exception as e:
-            print(f"⚠️ Error fetching image: {e}")
+def fetch_image(main_topic, subtopic, image_type="concept"):
+    query = f"{main_topic} {subtopic} {image_type} high quality realistic professional"
+    search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&searchType=image&key={GOOGLE_API_KEY}&cx={SEARCH_ENGINE_ID}&num=3"
+    try:
+        response = requests.get(search_url).json()
+        items = response.get("items", [])
+        for item in items:
+            img_url = item.get("link")
+            try:
+                img_response = requests.get(img_url, timeout=5)
+                content_type = img_response.headers.get("Content-Type", "")
+                if "image" not in content_type:
+                    continue  # Skip non-image content
+                img_data = img_response.content
+                img = Image.open(io.BytesIO(img_data))
+                if img.format == "WEBP":
+                    img = img.convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    return buf
+                return io.BytesIO(img_data)
+            except Exception as e:
+                print(f"⚠️ Skipping bad image URL: {img_url} — {e}")
+    except Exception as e:
+        print(f"⚠️ Failed search: {e}")
     return None
 
 def create_content_slide(prs, title, content, image_stream, index):
     blank_slide_layout = prs.slide_layouts[6]
     slide = prs.slides.add_slide(blank_slide_layout)
 
-    # Layout constants
     margin = Inches(0.5)
     image_width = Inches(4.5)
     image_height = Inches(4.0)
@@ -92,31 +104,24 @@ def create_content_slide(prs, title, content, image_stream, index):
     text_height = Inches(5.0)
 
     if index % 2 == 0:
-        # Even: Image left, Text right
         image_left = margin
         text_left = Inches(5)
     else:
-        # Odd: Text left, Image right
         image_left = Inches(5)
         text_left = margin
 
-    # Add image if available
     if image_stream:
         try:
             slide.shapes.add_picture(image_stream, image_left, Inches(1.0), width=image_width, height=image_height)
         except Exception as e:
             print(f"⚠️ Could not add image: {e}")
 
-    # Add text box
     textbox = slide.shapes.add_textbox(text_left, Inches(0.5), text_width, text_height)
     tf = textbox.text_frame
     tf.word_wrap = True
     tf.auto_size = True
 
-    # Title
     tf.text = title
-
-    # Content
     p = tf.add_paragraph()
     p.text = content
     p.level = 1
@@ -125,7 +130,8 @@ def add_title_slide(prs, topic):
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
     slide.shapes.title.text = topic
-    slide.placeholders[1].text = "Your Name Here"
+    if len(slide.placeholders) > 1:
+        slide.placeholders[1].text = "Your Name Here"
 
 def choose_template():
     templates = [f for f in os.listdir(TEMPLATE_DIR) if f.endswith(".pptx")]
@@ -152,8 +158,8 @@ def main():
 
     add_title_slide(prs, topic)
 
-    for idx, (title, content) in enumerate(subtopics):
-        img = fetch_image(topic, title)
+    for idx, (title, content, image_type) in enumerate(subtopics):
+        img = fetch_image(topic, title, image_type)
         create_content_slide(prs, title, content, img, idx)
 
     output_path = f"{topic.replace(' ', '_')}.pptx"
