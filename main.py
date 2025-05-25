@@ -11,9 +11,9 @@ from google.generativeai import configure, GenerativeModel
 from PIL import Image
 
 # === CONFIGURATION ===
-GOOGLE_API_KEY = "AIzaSyAABoqmArgjddo1ROP9q4dLYf_Bo7WVLsQ"  # Replace this with your actual Gemini API key
-SEARCH_ENGINE_ID = "35d98aa59458c428a"  # Replace with your Google Custom Search Engine ID
-GEMINI_API = "AIzaSyAVwOIb2B3hE_hRxlpt5EWcNANAsg3eJ8U"
+GOOGLE_API_KEY = "Enter_your_Api"  # Replace this with your actual Gemini API key
+SEARCH_ENGINE_ID = "Google_search_engine API"  # Replace with your Google Custom Search Engine ID
+GEMINI_API = "Gemini API key - Register/get it, and then add it here"
 
 configure(api_key=GEMINI_API)
 model = GenerativeModel(model_name="models/gemini-1.5-pro")
