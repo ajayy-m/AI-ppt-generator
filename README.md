@@ -1,8 +1,3 @@
-Absolutely! Here's a clean and professional `README.md` for your **AI Presentation Generator** project. This version explains the features, setup, usage, and includes room for screenshots if you want to add them later.
-
----
-
-````markdown
 # 🎯 AI-Powered Presentation Generator
 
 This is an intelligent Python-based tool that creates professional PowerPoint presentations using AI. It automatically generates slide content, fetches relevant high-quality images, and builds a `.pptx` file using randomly selected templates.
@@ -74,4 +69,3 @@ Apache 2.0 License
 * [Google Custom Search JSON API](https://developers.google.com/custom-search/v1/overview)
 * [python-pptx](https://python-pptx.readthedocs.io/)
 
-```
